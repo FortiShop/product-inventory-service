@@ -1,4 +1,4 @@
-package org.fortishop.productinventoryservice.response;
+package org.fortishop.productinventoryservice.dto.response;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

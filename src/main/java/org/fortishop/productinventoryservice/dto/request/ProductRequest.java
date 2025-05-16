@@ -1,4 +1,4 @@
-package org.fortishop.productinventoryservice.request;
+package org.fortishop.productinventoryservice.dto.request;
 
 import java.math.BigDecimal;
 import lombok.AllArgsConstructor;

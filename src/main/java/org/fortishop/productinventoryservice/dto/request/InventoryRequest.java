@@ -1,4 +1,4 @@
-package org.fortishop.productinventoryservice.request;
+package org.fortishop.productinventoryservice.dto.request;
 
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;

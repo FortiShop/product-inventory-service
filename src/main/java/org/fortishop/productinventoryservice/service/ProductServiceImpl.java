@@ -9,10 +9,10 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.fortishop.productinventoryservice.Repository.ProductRepository;
 import org.fortishop.productinventoryservice.domain.Product;
+import org.fortishop.productinventoryservice.dto.request.ProductRequest;
+import org.fortishop.productinventoryservice.dto.response.ProductResponse;
 import org.fortishop.productinventoryservice.exception.Product.ProductException;
 import org.fortishop.productinventoryservice.exception.Product.ProductExceptionType;
-import org.fortishop.productinventoryservice.request.ProductRequest;
-import org.fortishop.productinventoryservice.response.ProductResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+
     private final RedisTemplate<String, String> redisTemplate;
 
     private static final String PRODUCT_VIEW_KEY = "product:views";

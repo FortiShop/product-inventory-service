@@ -3,11 +3,11 @@ package org.fortishop.productinventoryservice.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
+import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.exception.Product.ProductException;
 import org.fortishop.productinventoryservice.exception.Product.ProductExceptionType;
 import org.fortishop.productinventoryservice.global.Responder;
-import org.fortishop.productinventoryservice.request.InventoryRequest;
-import org.fortishop.productinventoryservice.response.InventoryResponse;
 import org.fortishop.productinventoryservice.service.InventoryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,12 +33,12 @@ public class InventoryController {
         }
     }
 
-    @GetMapping("/inventory/{productId}")
+    @GetMapping("/{productId}")
     public ResponseEntity<InventoryResponse> getInventory(@PathVariable(name = "productId") Long productId) {
         return Responder.success(inventoryService.getInventory(productId));
     }
 
-    @PutMapping("/inventory/{productId}")
+    @PutMapping("/{productId}")
     public ResponseEntity<InventoryResponse> setInventory(
             @PathVariable(name = "productId") Long productId,
             @RequestBody @Valid InventoryRequest request,
