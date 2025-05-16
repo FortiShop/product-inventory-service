@@ -285,7 +285,7 @@ public class ProductInventoryServiceIntegrationTests {
         producer.send(new ProducerRecord<>("order.created", product.getId().toString(), orderEvent));
         producer.flush();
 
-        Thread.sleep(2000); // Kafka 처리 대기
+        Thread.sleep(2000);
 
         Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isEqualTo(8);
@@ -332,7 +332,7 @@ public class ProductInventoryServiceIntegrationTests {
         t1.join();
         t2.join();
 
-        Thread.sleep(3000); // Kafka 소비 처리 대기
+        Thread.sleep(3000);
 
         Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isBetween(0, 5);
