@@ -1,11 +1,13 @@
 package org.fortishop.productinventoryservice;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -311,9 +313,18 @@ public class ProductInventoryServiceIntegrationTests {
                 "items", List.of(Map.of("productId", product.getId(), "quantity", 2, "price", 1000))
         );
 
+        String bootstrapServers = kafka.getHost() + ":" + kafka.getMappedPort(9093);
+
+        try (AdminClient admin = AdminClient.create(
+                Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers))) {
+            await()
+                    .atMost(Duration.ofSeconds(10))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> admin.listTopics().names().get().contains("order.created"));
+        }
+
         KafkaProducer<String, Object> producer = new KafkaProducer<>(Map.of(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                kafka.getHost() + ":" + kafka.getMappedPort(9093),
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                 org.springframework.kafka.support.serializer.JsonSerializer.class
@@ -321,11 +332,15 @@ public class ProductInventoryServiceIntegrationTests {
 
         producer.send(new ProducerRecord<>("order.created", product.getId().toString(), orderEvent));
         producer.flush();
+        producer.close();
 
-        Thread.sleep(10000);
-
-        Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
-        assertThat(inventory.getQuantity()).isEqualTo(8);
+        await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(300))
+                .untilAsserted(() -> {
+                    Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
+                    assertThat(inventory.getQuantity()).isEqualTo(8);
+                });
     }
 
     @Test

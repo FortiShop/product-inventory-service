@@ -9,5 +9,5 @@ public interface InventoryService {
 
     InventoryResponse getInventory(Long productId);
 
-    boolean decreaseStockWithLock(Long productId, int quantity, String traceId);
+    boolean decreaseStockWithLock(Long orderId, Long productId, int quantity, String traceId);
 }

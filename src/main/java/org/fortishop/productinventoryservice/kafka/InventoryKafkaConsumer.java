@@ -17,9 +17,9 @@ public class InventoryKafkaConsumer {
     @KafkaListener(topics = "order.created", groupId = "inventory-group")
     public void handleOrderCreated(OrderCreatedEvent event) {
         log.info("[Kafka] Received order.created: orderId={}, traceId={}", event.getOrderId(), event.getTraceId());
-
         event.getItems().forEach(item ->
-                inventoryService.decreaseStockWithLock(item.getProductId(), item.getQuantity(), event.getTraceId())
+                inventoryService.decreaseStockWithLock(event.getOrderId(), item.getProductId(), item.getQuantity(),
+                        event.getTraceId())
         );
     }
 }

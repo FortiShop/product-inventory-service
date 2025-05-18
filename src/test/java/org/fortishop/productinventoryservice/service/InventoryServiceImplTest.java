@@ -99,56 +99,60 @@ class InventoryServiceImplTest {
     @Test
     @DisplayName("재고 차감 성공 및 이벤트 발행")
     void decreaseStock_success() throws Exception {
+        Long orderId = 100L;
         Long productId = 1L;
         String traceId = "trace123";
         Inventory inventory = Inventory.builder().productId(productId).quantity(50).build();
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
-        given(lock.isHeldByCurrentThread()).willReturn(true); // 🔥 핵심 추가
+        given(lock.isHeldByCurrentThread()).willReturn(true);
         given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
-        boolean result = inventoryService.decreaseStockWithLock(productId, 20, traceId);
+        boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
         assertThat(result).isTrue();
         assertThat(inventory.getQuantity()).isEqualTo(30);
-        verify(kafkaTemplate).send(eq("inventory.reserved"), eq(productId.toString()), any());
+        verify(kafkaTemplate).send(eq("inventory.reserved"), eq(orderId.toString()), any());
         verify(lock).unlock();
     }
 
     @Test
     @DisplayName("재고 차감 실패 - 수량 부족")
     void decreaseStock_insufficientQuantity() throws Exception {
+        Long orderId = 200L;
         Long productId = 1L;
         String traceId = "trace456";
         Inventory inventory = Inventory.builder().productId(productId).quantity(10).build();
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
-        given(lock.isHeldByCurrentThread()).willReturn(true); // 🔥 추가
+        given(lock.isHeldByCurrentThread()).willReturn(true);
         given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
-        boolean result = inventoryService.decreaseStockWithLock(productId, 20, traceId);
+        boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
         assertThat(result).isFalse();
-        verify(kafkaTemplate).send(eq("inventory.failed"), eq(productId.toString()), any());
-        verify(lock).unlock(); // now this will pass
+        verify(kafkaTemplate).send(eq("inventory.failed"), eq(orderId.toString()), any());
+        verify(lock).unlock();
     }
 
     @Test
     @DisplayName("재고 차감 실패 - 락 획득 실패")
     void decreaseStock_lockFail() throws Exception {
+        Long orderId = 300L;
         Long productId = 1L;
         String traceId = "trace789";
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(false);
 
-        boolean result = inventoryService.decreaseStockWithLock(productId, 10, traceId);
+        boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 10, traceId);
 
         assertThat(result).isFalse();
         verify(inventoryRepository, never()).findByProductId(any());
-        verify(kafkaTemplate, never()).send(any(), any(), any());
+        verify(kafkaTemplate).send(eq("inventory.failed"), eq(orderId.toString()), any());
     }
+
 }
 

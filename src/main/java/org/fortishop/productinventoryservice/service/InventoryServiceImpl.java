@@ -47,7 +47,7 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     @Transactional
-    public boolean decreaseStockWithLock(Long productId, int quantity, String traceId) {
+    public boolean decreaseStockWithLock(Long orderId, Long productId, int quantity, String traceId) {
         String lockKey = "lock:product:" + productId;
         RLock lock = redissonClient.getLock(lockKey);
         boolean success = false;
@@ -58,16 +58,19 @@ public class InventoryServiceImpl implements InventoryService {
                         .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
 
                 if (inventory.getQuantity() < quantity) {
-                    sendInventoryFailed(productId, "재고 부족", traceId);
+                    sendInventoryFailed(orderId, productId, "재고 부족", traceId);
                     return false;
                 }
 
                 inventory.adjust(-quantity);
-                sendInventoryReserved(productId, traceId);
+                sendInventoryReserved(orderId, productId, traceId);
                 success = true;
+            } else {
+                sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
         } finally {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
@@ -77,24 +80,25 @@ public class InventoryServiceImpl implements InventoryService {
         return success;
     }
 
-    private void sendInventoryReserved(Long productId, String traceId) {
+    private void sendInventoryReserved(Long orderId, Long productId, String traceId) {
         Map<String, Object> event = Map.of(
+                "orderId", orderId,
                 "productId", productId,
                 "reserved", true,
                 "timestamp", LocalDateTime.now().toString(),
                 "traceId", traceId
         );
-        kafkaTemplate.send("inventory.reserved", productId.toString(), event);
+        kafkaTemplate.send("inventory.reserved", orderId.toString(), event);
     }
 
-    private void sendInventoryFailed(Long productId, String reason, String traceId) {
+    private void sendInventoryFailed(Long orderId, Long productId, String reason, String traceId) {
         Map<String, Object> event = Map.of(
+                "orderId", orderId,
                 "productId", productId,
                 "reason", reason,
                 "timestamp", LocalDateTime.now().toString(),
                 "traceId", traceId
         );
-        kafkaTemplate.send("inventory.failed", productId.toString(), event);
+        kafkaTemplate.send("inventory.failed", orderId.toString(), event);
     }
-
 }
