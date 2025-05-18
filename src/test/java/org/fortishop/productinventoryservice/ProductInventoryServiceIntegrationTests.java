@@ -14,6 +14,7 @@ import java.util.Properties;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -30,6 +31,7 @@ import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
 import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.dto.response.ProductResponse;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -98,19 +100,44 @@ public class ProductInventoryServiceIntegrationTests {
 
     @Container
     static GenericContainer<?> kafka = new GenericContainer<>(DockerImageName.parse("bitnami/kafka:3.6.0"))
-            .withExposedPorts(9092)
-            .withCreateContainerCmdModifier(cmd -> cmd.withHostConfig(
-                    Objects.requireNonNull(cmd.getHostConfig())
-                            .withPortBindings(new PortBinding(Ports.Binding.bindPort(9092), new ExposedPort(9092)))
-            ))
+            .withExposedPorts(9092, 9093)
             .withNetwork(Network.SHARED)
+            .withNetworkAliases("kafka")
+            .withCreateContainerCmdModifier(cmd -> {
+                cmd.withHostName("kafka");
+                cmd.withHostConfig(
+                        Objects.requireNonNull(cmd.getHostConfig())
+                                .withPortBindings(
+                                        new PortBinding(Ports.Binding.bindPort(9092), new ExposedPort(9092)),
+                                        new PortBinding(Ports.Binding.bindPort(9093), new ExposedPort(9093))
+                                )
+                );
+            })
             .withEnv("KAFKA_BROKER_ID", "1")
             .withEnv("ALLOW_PLAINTEXT_LISTENER", "yes")
             .withEnv("KAFKA_CFG_ZOOKEEPER_CONNECT", "zookeeper:2181")
-            .withEnv("KAFKA_CFG_LISTENERS", "PLAINTEXT://0.0.0.0:9092")
-            .withEnv("KAFKA_CFG_ADVERTISED_LISTENERS", "PLAINTEXT://127.0.0.1:9092")
+
+            // ✅ 리스너 등록
+            .withEnv("KAFKA_CFG_LISTENERS", "PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093")
+
+            // ✅ 광고 주소 설정 (컨테이너 내부용 / 외부 JVM용)
+            .withEnv("KAFKA_CFG_ADVERTISED_LISTENERS",
+                    "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093")
+
+            .withEnv("KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP",
+                    "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT")
+            .withEnv("KAFKA_INTER_BROKER_LISTENER_NAME", "PLAINTEXT")
             .withEnv("KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE", "true")
             .waitingFor(Wait.forLogMessage(".*\\[KafkaServer id=\\d+] started.*\\n", 1));
+
+    @Container
+    static GenericContainer<?> kafkaUi = new GenericContainer<>(DockerImageName.parse("provectuslabs/kafka-ui:latest"))
+            .withExposedPorts(8080)
+            .withEnv("KAFKA_CLUSTERS_0_NAME", "fortishop-cluster")
+            .withEnv("KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS", "PLAINTEXT://kafka:9092")
+            .withEnv("KAFKA_CLUSTERS_0_ZOOKEEPER", "zookeeper:2181")
+            .withNetwork(Network.SHARED)
+            .withNetworkAliases("kafka-ui");
 
     @DynamicPropertySource
     static void overrideProps(DynamicPropertyRegistry registry) {
@@ -118,17 +145,30 @@ public class ProductInventoryServiceIntegrationTests {
         redis.start();
         zookeeper.start();
         kafka.start();
+        kafkaUi.start();
 
         registry.add("spring.datasource.url", mysql::getJdbcUrl);
         registry.add("spring.datasource.username", mysql::getUsername);
         registry.add("spring.datasource.password", mysql::getPassword);
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
-        registry.add("spring.kafka.bootstrap-servers", () -> "127.0.0.1:9092");
+        registry.add("spring.kafka.bootstrap-servers", () -> kafka.getHost() + ":" + kafka.getMappedPort(9093));
     }
 
     private String getBaseUrl() {
         return "http://localhost:" + port + "/api/products";
+    }
+
+    private static boolean topicCreated = false;
+
+    @BeforeAll
+    static void printKafkaUiUrl() throws Exception {
+        System.out.println("Kafka UI is available at: http://" + kafkaUi.getHost() + ":" + kafkaUi.getMappedPort(8080));
+        if (!topicCreated) {
+            String bootstrap = kafka.getHost() + ":" + kafka.getMappedPort(9093);
+            createTopicIfNotExists("order.created", bootstrap);
+            topicCreated = true;
+        }
     }
 
     @BeforeEach
@@ -262,9 +302,6 @@ public class ProductInventoryServiceIntegrationTests {
 
         inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(10).build());
 
-        String bootstrap = "127.0.0.1:9092";
-        createTopicIfNotExists("order.created", bootstrap);
-
         Map<String, Object> orderEvent = Map.of(
                 "orderId", 1,
                 "memberId", 1,
@@ -276,7 +313,7 @@ public class ProductInventoryServiceIntegrationTests {
 
         KafkaProducer<String, Object> producer = new KafkaProducer<>(Map.of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                kafka.getHost() + ":" + kafka.getMappedPort(9092),
+                kafka.getHost() + ":" + kafka.getMappedPort(9093),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                 org.springframework.kafka.support.serializer.JsonSerializer.class
@@ -285,7 +322,7 @@ public class ProductInventoryServiceIntegrationTests {
         producer.send(new ProducerRecord<>("order.created", product.getId().toString(), orderEvent));
         producer.flush();
 
-        Thread.sleep(2000);
+        Thread.sleep(10000);
 
         Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isEqualTo(8);
@@ -300,9 +337,6 @@ public class ProductInventoryServiceIntegrationTests {
 
         inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(5).build());
 
-        String bootstrap = "127.0.0.1:9092";
-        createTopicIfNotExists("order.created", bootstrap);
-
         Runnable task = () -> {
             Map<String, Object> orderEvent = Map.of(
                     "orderId", new Random().nextInt(10000),
@@ -315,7 +349,7 @@ public class ProductInventoryServiceIntegrationTests {
 
             KafkaProducer<String, Object> producer = new KafkaProducer<>(Map.of(
                     ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-                    kafka.getHost() + ":" + kafka.getMappedPort(9092),
+                    kafka.getHost() + ":" + kafka.getMappedPort(9093),
                     ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                     ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                     org.springframework.kafka.support.serializer.JsonSerializer.class
@@ -338,16 +372,26 @@ public class ProductInventoryServiceIntegrationTests {
         assertThat(inventory.getQuantity()).isBetween(0, 5);
     }
 
-    private void createTopicIfNotExists(String topic, String bootstrapServers) throws Exception {
+    private static void createTopicIfNotExists(String topic, String bootstrapServers) {
         Properties config = new Properties();
         config.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 
         try (AdminClient admin = AdminClient.create(config)) {
-            Set<String> existing = admin.listTopics().names().get(3, TimeUnit.SECONDS);
-            if (!existing.contains(topic)) {
-                admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1)))
-                        .all().get(3, TimeUnit.SECONDS);
+            Set<String> existingTopics = admin.listTopics().names().get(3, TimeUnit.SECONDS);
+            if (!existingTopics.contains(topic)) {
+                try {
+                    admin.createTopics(List.of(new NewTopic(topic, 1, (short) 1)))
+                            .all().get(3, TimeUnit.SECONDS);
+                } catch (ExecutionException e) {
+                    if (e.getCause() instanceof org.apache.kafka.common.errors.TopicExistsException) {
+                        System.out.println("Topic already exists: " + topic);
+                    } else {
+                        throw e;
+                    }
+                }
             }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to check or create topic: " + topic, e);
         }
     }
 }
