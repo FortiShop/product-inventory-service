@@ -118,14 +118,9 @@ public class ProductInventoryServiceIntegrationTests {
             .withEnv("KAFKA_BROKER_ID", "1")
             .withEnv("ALLOW_PLAINTEXT_LISTENER", "yes")
             .withEnv("KAFKA_CFG_ZOOKEEPER_CONNECT", "zookeeper:2181")
-
-            // ✅ 리스너 등록
             .withEnv("KAFKA_CFG_LISTENERS", "PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093")
-
-            // ✅ 광고 주소 설정 (컨테이너 내부용 / 외부 JVM용)
             .withEnv("KAFKA_CFG_ADVERTISED_LISTENERS",
                     "PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093")
-
             .withEnv("KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP",
                     "PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT")
             .withEnv("KAFKA_INTER_BROKER_LISTENER_NAME", "PLAINTEXT")
