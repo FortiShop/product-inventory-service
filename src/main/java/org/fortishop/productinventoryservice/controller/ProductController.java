@@ -15,9 +15,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -33,7 +33,7 @@ public class ProductController {
     private static final String ADMIN_ROLE = "ROLE_ADMIN";
 
     private void validateAdmin(HttpServletRequest request) {
-        String role = request.getHeader("X-ROLE");
+        String role = request.getHeader("x-member-role");
         if (!ADMIN_ROLE.equals(role)) {
             throw new ProductException(ProductExceptionType.UNAUTHORIZED_USER);
         }
@@ -49,7 +49,7 @@ public class ProductController {
         return Responder.success(response, HttpStatus.CREATED);
     }
 
-    @PutMapping("/{productId}")
+    @PatchMapping("/{productId}")
     public ResponseEntity<ProductResponse> updateProduct(
             @PathVariable(name = "productId") Long productId,
             @RequestBody @Valid ProductRequest request,

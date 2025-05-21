@@ -180,7 +180,7 @@ public class ProductInventoryServiceIntegrationTests {
         ProductRequest request = new ProductRequest("상품명", "설명", BigDecimal.valueOf(10000), "카테고리", "image.jpg", true);
 
         HttpHeaders headers = new HttpHeaders();
-        headers.set("x-role", "ROLE_ADMIN");
+        headers.set("x-member-role", "ROLE_ADMIN");
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<ProductRequest> entity = new HttpEntity<>(request, headers);
 
@@ -211,13 +211,13 @@ public class ProductInventoryServiceIntegrationTests {
 
         InventoryRequest req = new InventoryRequest(50);
         HttpHeaders headers = new HttpHeaders();
-        headers.set("x-role", "ROLE_ADMIN");
+        headers.set("x-member-role", "ROLE_ADMIN");
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<InventoryRequest> entity = new HttpEntity<>(req, headers);
 
         ResponseEntity<InventoryResponse> setRes = restTemplate.exchange(
                 "http://localhost:" + port + "/api/inventory/" + productId,
-                HttpMethod.PUT,
+                HttpMethod.PATCH,
                 entity,
                 InventoryResponse.class
         );
@@ -303,6 +303,7 @@ public class ProductInventoryServiceIntegrationTests {
                 "orderId", 1,
                 "memberId", 1,
                 "totalPrice", 1000,
+                "address", "서울특별시",
                 "createdAt", LocalDateTime.now().toString(),
                 "traceId", UUID.randomUUID().toString(),
                 "items", List.of(Map.of("productId", product.getId(), "quantity", 2, "price", 1000))
@@ -352,6 +353,7 @@ public class ProductInventoryServiceIntegrationTests {
                     "orderId", new Random().nextInt(10000),
                     "memberId", 1,
                     "totalPrice", 1000,
+                    "address", "서울특별시",
                     "createdAt", LocalDateTime.now().toString(),
                     "traceId", UUID.randomUUID().toString(),
                     "items", List.of(Map.of("productId", product.getId(), "quantity", 5, "price", 1000))

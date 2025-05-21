@@ -11,8 +11,8 @@ import org.fortishop.productinventoryservice.global.Responder;
 import org.fortishop.productinventoryservice.service.InventoryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,7 +27,7 @@ public class InventoryController {
     private static final String ADMIN_ROLE = "ROLE_ADMIN";
 
     private void validateAdmin(HttpServletRequest request) {
-        String role = request.getHeader("X-ROLE");
+        String role = request.getHeader("x-member-role");
         if (!ADMIN_ROLE.equals(role)) {
             throw new ProductException(ProductExceptionType.UNAUTHORIZED_USER);
         }
@@ -38,7 +38,7 @@ public class InventoryController {
         return Responder.success(inventoryService.getInventory(productId));
     }
 
-    @PutMapping("/{productId}")
+    @PatchMapping("/{productId}")
     public ResponseEntity<InventoryResponse> setInventory(
             @PathVariable(name = "productId") Long productId,
             @RequestBody @Valid InventoryRequest request,
