@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.Repository.ProductRepository;
 import org.fortishop.productinventoryservice.domain.Product;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
@@ -25,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductRepository productRepository;
+
+    private final InventoryRepository inventoryRepository;
 
     private final RedisTemplate<String, String> redisTemplate;
 
@@ -65,6 +68,9 @@ public class ProductServiceImpl implements ProductService {
     public void deleteProduct(Long id) {
         if (!productRepository.existsById(id)) {
             throw new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND);
+        }
+        if (inventoryRepository.findByProductId(id).isPresent()) {
+            inventoryRepository.deleteById(id);
         }
         productRepository.deleteById(id);
     }
