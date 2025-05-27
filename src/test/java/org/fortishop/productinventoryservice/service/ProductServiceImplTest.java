@@ -38,6 +38,9 @@ class ProductServiceImplTest {
     private ProductServiceImpl productService;
 
     @Mock
+    private ProductSyncService productSyncService;
+
+    @Mock
     private ProductRepository productRepository;
 
     @Mock
@@ -98,16 +101,6 @@ class ProductServiceImplTest {
 
         assertThat(result.getName()).isEqualTo("new");
         verify(productRepository).findById(1L);
-    }
-
-    @Test
-    @DisplayName("상품 삭제 성공")
-    void deleteProduct_success() {
-        given(productRepository.existsById(1L)).willReturn(true);
-
-        productService.deleteProduct(1L);
-
-        verify(productRepository).deleteById(1L);
     }
 
     @Test

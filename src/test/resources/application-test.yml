@@ -49,6 +49,11 @@ spring:
     username: guest
     password: guest
 
+  elasticsearch:
+    uris: http://localhost:9200
+    connection-timeout: 3s
+    socket-timeout: 5s
+
 logging:
   level:
     root: INFO

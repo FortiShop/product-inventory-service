@@ -27,8 +27,10 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.Repository.ProductRepository;
+import org.fortishop.productinventoryservice.Repository.ProductSearchRepository;
 import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.domain.Product;
+import org.fortishop.productinventoryservice.domain.ProductDocument;
 import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
 import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
@@ -83,6 +85,9 @@ public class ProductInventoryServiceIntegrationTests {
     @Autowired
     InventoryRepository inventoryRepository;
 
+    @Autowired
+    ProductSearchRepository searchRepository;
+
     @Container
     static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
             .withDatabaseName("fortishop")
@@ -136,6 +141,15 @@ public class ProductInventoryServiceIntegrationTests {
             .withNetwork(Network.SHARED)
             .withNetworkAliases("kafka-ui");
 
+    @Container
+    static GenericContainer<?> elasticsearch = new GenericContainer<>(
+            "docker.elastic.co/elasticsearch/elasticsearch:9.0.0")
+            .withExposedPorts(9200)
+            .withEnv("discovery.type", "single-node")
+            .withEnv("xpack.security.enabled", "false") // 인증 비활성화 (테스트용)
+            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .waitingFor(Wait.forHttp("/").forStatusCode(200));
+
     @DynamicPropertySource
     static void overrideProps(DynamicPropertyRegistry registry) {
         mysql.start();
@@ -143,6 +157,7 @@ public class ProductInventoryServiceIntegrationTests {
         zookeeper.start();
         kafka.start();
         kafkaUi.start();
+        elasticsearch.start();
 
         registry.add("spring.datasource.url", mysql::getJdbcUrl);
         registry.add("spring.datasource.username", mysql::getUsername);
@@ -150,6 +165,8 @@ public class ProductInventoryServiceIntegrationTests {
         registry.add("spring.data.redis.host", redis::getHost);
         registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("spring.kafka.bootstrap-servers", () -> kafka.getHost() + ":" + kafka.getMappedPort(9093));
+        registry.add("spring.elasticsearch.uris", () ->
+                "http://" + elasticsearch.getHost() + ":" + elasticsearch.getMappedPort(9200));
     }
 
     private String getBaseUrl() {
@@ -382,6 +399,45 @@ public class ProductInventoryServiceIntegrationTests {
 
         Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isBetween(0, 5);
+    }
+
+    @Test
+    @DisplayName("Elasticsearch 상품 검색 성공")
+    void searchProducts_elasticsearch_success() throws Exception {
+        // given
+        Product p1 = productRepository.save(Product.builder()
+                .name("Apple iPhone").description("Smartphone").price(BigDecimal.valueOf(1000))
+                .category("Electronics").imageUrl("iphone.jpg").isActive(true).build());
+        Product p2 = productRepository.save(Product.builder()
+                .name("Banana Phone").description("Gag gift").price(BigDecimal.valueOf(10))
+                .category("Fun").imageUrl("banana.jpg").isActive(true).build());
+
+        ProductDocument doc1 = ProductDocument.builder()
+                .id(p1.getId()).name(p1.getName()).description(p1.getDescription())
+                .price(p1.getPrice()).category(p1.getCategory()).build();
+
+        ProductDocument doc2 = ProductDocument.builder()
+                .id(p2.getId()).name(p2.getName()).description(p2.getDescription())
+                .price(p2.getPrice()).category(p2.getCategory()).build();
+
+        searchRepository.saveAll(List.of(doc1, doc2));
+
+        await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(300))
+                .untilAsserted(() -> {
+                    ResponseEntity<String> res = restTemplate.getForEntity(
+                            getBaseUrl() + "/search?keyword=Apple", String.class);
+                    assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
+                    assertThat(res.getBody()).contains("Apple iPhone");
+                });
+
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                getBaseUrl() + "/search?keyword=Phone", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).contains("Apple iPhone");
+        assertThat(response.getBody()).contains("Banana Phone");
     }
 
     private static void createTopicIfNotExists(String topic, String bootstrapServers) {

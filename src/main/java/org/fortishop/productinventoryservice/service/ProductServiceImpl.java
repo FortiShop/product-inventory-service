@@ -29,6 +29,8 @@ public class ProductServiceImpl implements ProductService {
 
     private final InventoryRepository inventoryRepository;
 
+    private final ProductSyncService productSyncService;
+
     private final RedisTemplate<String, String> redisTemplate;
 
     private static final String PRODUCT_VIEW_KEY = "product:views";
@@ -44,6 +46,7 @@ public class ProductServiceImpl implements ProductService {
                 .imageUrl(request.getImageUrl())
                 .isActive(request.isActive())
                 .build();
+        productSyncService.index(product);
         return ProductResponse.of(productRepository.save(product));
     }
 
@@ -60,6 +63,7 @@ public class ProductServiceImpl implements ProductService {
                 request.getImageUrl(),
                 request.isActive()
         );
+        productSyncService.update(id, request);
         return ProductResponse.of(product);
     }
 
@@ -73,6 +77,7 @@ public class ProductServiceImpl implements ProductService {
             inventoryRepository.deleteById(id);
         }
         productRepository.deleteById(id);
+        productSyncService.delete(id);
     }
 
     @Override
