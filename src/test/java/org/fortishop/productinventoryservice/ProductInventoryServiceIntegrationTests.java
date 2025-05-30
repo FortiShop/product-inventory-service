@@ -402,6 +402,53 @@ public class ProductInventoryServiceIntegrationTests {
     }
 
     @Test
+    @DisplayName("Payment Failed 수신시 재고가 복구 된다.")
+    void stockRestore_locking() throws Exception {
+        Product product = productRepository.save(Product.builder()
+                .name("Test Product").description("desc").price(BigDecimal.valueOf(1000))
+                .category("cat").imageUrl("img").isActive(true).build());
+
+        inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(5).build());
+
+        Map<String, Object> paymentFailed = Map.of(
+                "orderId", new Random().nextInt(10000),
+                "items", List.of(Map.of("productId", product.getId(), "quantity", 5, "price", 1000)),
+                "reason", "결제 실패",
+                "timeStamp", LocalDateTime.now().toString(),
+                "traceId", UUID.randomUUID().toString()
+        );
+
+        String bootstrapServers = kafka.getHost() + ":" + kafka.getMappedPort(9093);
+
+        try (AdminClient admin = AdminClient.create(
+                Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers))) {
+            await()
+                    .atMost(Duration.ofSeconds(10))
+                    .pollInterval(Duration.ofMillis(500))
+                    .until(() -> admin.listTopics().names().get().contains("payment.failed"));
+        }
+
+        KafkaProducer<String, Object> producer = new KafkaProducer<>(Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
+                org.springframework.kafka.support.serializer.JsonSerializer.class
+        ));
+
+        producer.send(new ProducerRecord<>("payment.failed", product.getId().toString(), paymentFailed));
+        producer.flush();
+        producer.close();
+
+        await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(300))
+                .untilAsserted(() -> {
+                    Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
+                    assertThat(inventory.getQuantity()).isEqualTo(10);
+                });
+    }
+
+    @Test
     @DisplayName("Elasticsearch 상품 검색 성공")
     void searchProducts_elasticsearch_success() throws Exception {
         // given

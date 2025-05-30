@@ -1,6 +1,5 @@
 package org.fortishop.productinventoryservice.dto.event;
 
-import java.math.BigDecimal;
 import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -8,15 +7,13 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
-public class OrderCreatedEvent {
+public class PaymentFailedEvent {
     private Long orderId;
-    private Long memberId;
-    private BigDecimal totalPrice;
-    private String address;
     private List<OrderItemInfo> items;
-    private String createdAt;
+    private String reason;
+    private String timestamp;
     private String traceId;
 }

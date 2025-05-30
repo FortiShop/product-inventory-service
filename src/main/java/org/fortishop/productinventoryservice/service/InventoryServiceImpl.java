@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
@@ -16,6 +17,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
@@ -78,6 +80,30 @@ public class InventoryServiceImpl implements InventoryService {
         }
 
         return success;
+    }
+
+    @Override
+    @Transactional
+    public void restoreStock(Long orderId, Long productId, int quantity, String traceId) {
+        String lockKey = "lock:product:" + productId;
+        RLock lock = redissonClient.getLock(lockKey);
+
+        try {
+            if (lock.tryLock(5, 2, TimeUnit.SECONDS)) {
+                Inventory inventory = inventoryRepository.findByProductId(productId)
+                        .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+                inventory.adjust(quantity);
+            } else {
+                sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 
     private void sendInventoryReserved(Long orderId, Long productId, String traceId) {

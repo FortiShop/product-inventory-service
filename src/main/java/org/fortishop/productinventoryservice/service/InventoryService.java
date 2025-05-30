@@ -10,4 +10,6 @@ public interface InventoryService {
     InventoryResponse getInventory(Long productId);
 
     boolean decreaseStockWithLock(Long orderId, Long productId, int quantity, String traceId);
+
+    void restoreStock(Long orderId, Long productId, int quantity, String traceId);
 }

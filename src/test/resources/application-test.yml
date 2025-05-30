@@ -27,14 +27,14 @@ spring:
     database-platform: org.hibernate.dialect.MySQL8Dialect
 
   kafka:
-    bootstrap-servers: kafka:9093  # override됨
-    admin:
-      auto-create: true
+    bootstrap-servers: localhost:9093
     consumer:
+      group-id: test-consumer
+      auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.fortishop.productinventoryservice.kafka.OrderCreatedEventDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
-        spring.json.trusted.packages: "*"
+        spring.json.trusted.packages: '*'
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
