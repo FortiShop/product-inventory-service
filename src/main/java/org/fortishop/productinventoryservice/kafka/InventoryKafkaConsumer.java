@@ -46,4 +46,16 @@ public class InventoryKafkaConsumer {
             throw e;
         }
     }
+
+    @KafkaListener(topics = "order.created.dlq", groupId = "inventory-dlq-group")
+    public void handleDlq(OrderCreatedEvent event) {
+        log.error("[DLQ 메시지 확인] order.created 처리 실패 : {}", event);
+        // slack 또는 이메일로 개발자, 관리자에게 알림
+    }
+
+    @KafkaListener(topics = "payment.failed.dlq", groupId = "inventory-dlq-group")
+    public void handleDlq(PaymentFailedEvent event) {
+        log.error("[DLQ 메시지 확인] payment.failed 처리 실패 : {}", event);
+        // slack 또는 이메일로 개발자, 관리자에게 알림
+    }
 }
