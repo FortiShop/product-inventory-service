@@ -73,7 +73,7 @@ public class ProductServiceImpl implements ProductService {
         if (!productRepository.existsById(id)) {
             throw new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND);
         }
-        if (inventoryRepository.findByProductId(id).isPresent()) {
+        if (inventoryRepository.findByProductIdForUpdate(id).isPresent()) {
             inventoryRepository.deleteById(id);
         }
         productRepository.deleteById(id);

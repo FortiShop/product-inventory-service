@@ -1,7 +1,5 @@
 package org.fortishop.productinventoryservice.service;
 
-import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,9 +9,9 @@ import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.exception.Product.ProductException;
 import org.fortishop.productinventoryservice.exception.Product.ProductExceptionType;
+import org.fortishop.productinventoryservice.kafka.InventoryEventProducer;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,14 +19,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
+
     private final InventoryRepository inventoryRepository;
     private final RedissonClient redissonClient;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final InventoryEventProducer inventoryEventProducer;
 
     @Override
     @Transactional
     public InventoryResponse setInventory(Long productId, InventoryRequest request) {
-        Inventory inventory = inventoryRepository.findByProductId(productId)
+        Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
                 .orElseGet(() -> inventoryRepository.save(
                         Inventory.builder()
                                 .productId(productId)
@@ -40,9 +39,9 @@ public class InventoryServiceImpl implements InventoryService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional
     public InventoryResponse getInventory(Long productId) {
-        Inventory inventory = inventoryRepository.findByProductId(productId)
+        Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
                 .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
         return InventoryResponse.of(inventory);
     }
@@ -55,30 +54,46 @@ public class InventoryServiceImpl implements InventoryService {
         boolean success = false;
 
         try {
-            if (lock.tryLock(5, 2, TimeUnit.SECONDS)) {
-                Inventory inventory = inventoryRepository.findByProductId(productId)
-                        .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+            if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                try {
+                    log.info("🔐 [Thread: {}] RedissonLock key={}, isLocked={}, heldByCurrentThread={}",
+                            Thread.currentThread().getName(),
+                            lockKey,
+                            lock.isLocked(),
+                            lock.isHeldByCurrentThread());
 
-                if (inventory.getQuantity() < quantity) {
-                    sendInventoryFailed(orderId, productId, "재고 부족", traceId);
-                    return false;
+                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
+                            .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+
+                    if (inventory.getQuantity() < quantity) {
+                        inventoryEventProducer.sendInventoryFailed(orderId, productId, "재고 부족", traceId);
+                        return false;
+                    }
+
+                    inventory.adjust(-quantity);
+                    inventoryRepository.save(inventory);
+                    log.info("✅ 재고 차감 성공 직후 수량: productId={}, 남은 수량={}", productId, inventory.getQuantity());
+
+                    inventoryEventProducer.sendInventoryReserved(orderId, productId, traceId);
+                    success = true;
+
+                } finally {
+                    if (lock.isHeldByCurrentThread()) {
+                        lock.unlock();
+                    }
                 }
-
-                inventory.adjust(-quantity);
-                sendInventoryReserved(orderId, productId, traceId);
-                success = true;
             } else {
-                sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
+                log.warn("❌ 락 획득 실패: productId={}, orderId={}", productId, orderId);
+                inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
             }
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
+        } catch (Exception e) {
+            log.error("❌ 재고 차감 중 예외 발생: orderId={}, error={}", orderId, e.getMessage());
+            inventoryEventProducer.sendInventoryFailed(orderId, productId, "예외 발생: " + e.getMessage(), traceId);
         }
-
         return success;
     }
 
@@ -89,42 +104,33 @@ public class InventoryServiceImpl implements InventoryService {
         RLock lock = redissonClient.getLock(lockKey);
 
         try {
-            if (lock.tryLock(5, 2, TimeUnit.SECONDS)) {
-                Inventory inventory = inventoryRepository.findByProductId(productId)
-                        .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
-                inventory.adjust(quantity);
+            if (lock.tryLock(5, TimeUnit.SECONDS)) {
+                try {
+                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
+                            .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+
+                    inventory.adjust(quantity);
+                    inventoryRepository.save(inventory);
+                    log.info("✅ 재고 복원 성공: productId={}, 복원 수량={}, 현재 수량={}",
+                            productId, quantity, inventory.getQuantity());
+
+                } finally {
+                    if (lock.isHeldByCurrentThread()) {
+                        lock.unlock();
+                    }
+                }
+
             } else {
-                sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
+                log.warn("❌ 재고 복원 실패 (락 획득 실패): productId={}, orderId={}", productId, orderId);
+                inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
             }
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
-        } finally {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
+        } catch (Exception e) {
+            log.error("❌ 재고 복원 중 예외 발생: orderId={}, error={}", orderId, e.getMessage());
+            inventoryEventProducer.sendInventoryFailed(orderId, productId, "예외 발생: " + e.getMessage(), traceId);
         }
-    }
-
-    private void sendInventoryReserved(Long orderId, Long productId, String traceId) {
-        Map<String, Object> event = Map.of(
-                "orderId", orderId,
-                "productId", productId,
-                "reserved", true,
-                "timestamp", LocalDateTime.now().toString(),
-                "traceId", traceId
-        );
-        kafkaTemplate.send("inventory.reserved", orderId.toString(), event);
-    }
-
-    private void sendInventoryFailed(Long orderId, Long productId, String reason, String traceId) {
-        Map<String, Object> event = Map.of(
-                "orderId", orderId,
-                "productId", productId,
-                "reason", reason,
-                "timestamp", LocalDateTime.now().toString(),
-                "traceId", traceId
-        );
-        kafkaTemplate.send("inventory.failed", orderId.toString(), event);
     }
 }

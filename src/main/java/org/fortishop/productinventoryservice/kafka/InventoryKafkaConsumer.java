@@ -16,7 +16,7 @@ public class InventoryKafkaConsumer {
 
     private final InventoryService inventoryService;
 
-    @KafkaListener(topics = "order.created", groupId = "inventory-group", containerFactory = "orderCreatedListenerContainerFactory")
+    @KafkaListener(topics = "order.created", groupId = "inventory-group", containerFactory = "orderCreatedListenerContainerFactory", concurrency = "4")
     public void handleOrderCreated(OrderCreatedEvent event, Acknowledgment ack) {
         try {
             log.info("[Kafka] Received order.created: orderId={}, traceId={}", event.getOrderId(), event.getTraceId());

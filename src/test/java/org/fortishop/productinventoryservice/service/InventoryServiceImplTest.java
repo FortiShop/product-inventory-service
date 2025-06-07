@@ -50,7 +50,7 @@ class InventoryServiceImplTest {
         Long productId = 1L;
         InventoryRequest request = new InventoryRequest(100);
 
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.empty());
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.empty());
         given(inventoryRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
 
         InventoryResponse response = inventoryService.setInventory(productId, request);
@@ -66,7 +66,7 @@ class InventoryServiceImplTest {
         InventoryRequest request = new InventoryRequest(30);
         Inventory inventory = Inventory.builder().productId(productId).quantity(10).build();
 
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
         InventoryResponse response = inventoryService.setInventory(productId, request);
 
@@ -79,7 +79,7 @@ class InventoryServiceImplTest {
         Long productId = 1L;
         Inventory inventory = Inventory.builder().productId(productId).quantity(20).build();
 
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
         InventoryResponse response = inventoryService.getInventory(productId);
 
@@ -90,7 +90,7 @@ class InventoryServiceImplTest {
     @DisplayName("재고 조회 실패 - 존재하지 않음")
     void getInventory_notFound() {
         Long productId = 1L;
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.empty());
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> inventoryService.getInventory(productId))
                 .isInstanceOf(ProductException.class);
@@ -107,7 +107,7 @@ class InventoryServiceImplTest {
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
@@ -128,7 +128,7 @@ class InventoryServiceImplTest {
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
-        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
@@ -150,7 +150,7 @@ class InventoryServiceImplTest {
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 10, traceId);
 
         assertThat(result).isFalse();
-        verify(inventoryRepository, never()).findByProductId(any());
+        verify(inventoryRepository, never()).findByProductIdForUpdate(any());
         verify(kafkaTemplate).send(eq("inventory.failed"), eq(orderId.toString()), any());
     }
 

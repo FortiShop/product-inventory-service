@@ -351,7 +351,7 @@ public class ProductInventoryServiceIntegrationTests {
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(300))
                 .untilAsserted(() -> {
-                    Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
+                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
                     assertThat(inventory.getQuantity()).isEqualTo(8);
                 });
     }
@@ -397,7 +397,7 @@ public class ProductInventoryServiceIntegrationTests {
 
         Thread.sleep(3000);
 
-        Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
+        Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isBetween(0, 5);
     }
 
@@ -443,7 +443,7 @@ public class ProductInventoryServiceIntegrationTests {
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(300))
                 .untilAsserted(() -> {
-                    Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
+                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
                     assertThat(inventory.getQuantity()).isEqualTo(10);
                 });
     }
