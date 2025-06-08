@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.Repository.ProductRepository;
+import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.domain.Product;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
 import org.fortishop.productinventoryservice.dto.response.ProductResponse;
@@ -46,8 +47,17 @@ public class ProductServiceImpl implements ProductService {
                 .imageUrl(request.getImageUrl())
                 .isActive(request.isActive())
                 .build();
-        productSyncService.index(product);
-        return ProductResponse.of(productRepository.save(product));
+
+        Product savedProduct = productRepository.save(product);
+
+        Inventory inventory = Inventory.builder()
+                .productId(savedProduct.getId())
+                .quantity(0)
+                .build();
+        inventoryRepository.save(inventory);
+
+        productSyncService.index(savedProduct);
+        return ProductResponse.of(savedProduct);
     }
 
     @Override
@@ -73,9 +83,11 @@ public class ProductServiceImpl implements ProductService {
         if (!productRepository.existsById(id)) {
             throw new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND);
         }
-        if (inventoryRepository.findByProductIdForUpdate(id).isPresent()) {
-            inventoryRepository.deleteById(id);
+        if (!inventoryRepository.existsById(id)) {
+            throw new ProductException(ProductExceptionType.INVENTORY_NOT_FOUND);
         }
+
+        inventoryRepository.deleteByProductId(id);
         productRepository.deleteById(id);
         productSyncService.delete(id);
     }

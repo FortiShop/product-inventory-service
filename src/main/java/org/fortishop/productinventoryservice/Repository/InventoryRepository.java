@@ -12,5 +12,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM Inventory i WHERE i.productId = :productId")
     Optional<Inventory> findByProductIdForUpdate(@Param("productId") Long productId);
-}
 
+    void deleteByProductId(Long productId);
+}

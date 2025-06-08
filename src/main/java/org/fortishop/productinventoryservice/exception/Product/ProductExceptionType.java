@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 
 public enum ProductExceptionType implements BaseExceptionType {
     PRODUCT_NOT_FOUND("P001", "일치하는 상품이 존재하지 않습니다.", HttpStatus.NOT_FOUND),
+    INVENTORY_NOT_FOUND("P001", "일치하는 상품의 재고가 존재하지 않습니다.", HttpStatus.NOT_FOUND),
     UNAUTHORIZED_USER("P002", "잘못된 권한의 요청입니다.", HttpStatus.UNAUTHORIZED),
     ;
 
