@@ -8,5 +8,7 @@ public interface ProductSyncService {
 
     void update(Long productId, ProductRequest request);
 
+    void updateQuantity(Long productId, Integer quantity);
+
     void delete(Long productId);
 }

@@ -16,12 +16,11 @@ import org.springframework.data.elasticsearch.annotations.Document;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ProductDocument {
-
     @Id
     private Long id;
-
     private String name;
     private String description;
     private BigDecimal price;
+    private Integer quantity;
     private String category;
 }

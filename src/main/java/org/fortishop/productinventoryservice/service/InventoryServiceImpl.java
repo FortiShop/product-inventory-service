@@ -23,6 +23,7 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryRepository inventoryRepository;
     private final RedissonClient redissonClient;
     private final InventoryEventProducer inventoryEventProducer;
+    private final ProductSyncService productSyncService;
 
     @Override
     @Transactional
@@ -35,6 +36,7 @@ public class InventoryServiceImpl implements InventoryService {
                                 .build()));
 
         inventory.setQuantity(request.getQuantity());
+        productSyncService.updateQuantity(productId, request.getQuantity());
         return InventoryResponse.of(inventory);
     }
 

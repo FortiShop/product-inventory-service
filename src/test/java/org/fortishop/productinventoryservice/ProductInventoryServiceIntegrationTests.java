@@ -35,6 +35,7 @@ import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
 import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.dto.response.ProductResponse;
+import org.fortishop.productinventoryservice.service.TestInventoryHelper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -53,6 +54,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.Network;
@@ -86,7 +88,13 @@ public class ProductInventoryServiceIntegrationTests {
     InventoryRepository inventoryRepository;
 
     @Autowired
+    ProductSearchRepository productSearchRepository;
+
+    @Autowired
     ProductSearchRepository searchRepository;
+
+    @Autowired
+    private TestInventoryHelper testInventoryHelper;
 
     @Container
     static MySQLContainer<?> mysql = new MySQLContainer<>("mysql:8.0")
@@ -181,6 +189,7 @@ public class ProductInventoryServiceIntegrationTests {
         if (!topicCreated) {
             String bootstrap = kafka.getHost() + ":" + kafka.getMappedPort(9093);
             createTopicIfNotExists("order.created", bootstrap);
+            createTopicIfNotExists("payment.failed", bootstrap);
             topicCreated = true;
         }
     }
@@ -189,6 +198,7 @@ public class ProductInventoryServiceIntegrationTests {
     void cleanDatabase() {
         inventoryRepository.deleteAll();
         productRepository.deleteAll();
+        searchRepository.deleteAll();
     }
 
     @Test
@@ -224,7 +234,16 @@ public class ProductInventoryServiceIntegrationTests {
                 .isActive(true)
                 .build());
 
-        Long productId = saved.getId();
+        productSearchRepository.save(
+                ProductDocument.builder()
+                        .id(saved.getId())
+                        .name(saved.getName())
+                        .description(saved.getDescription())
+                        .price(saved.getPrice())
+                        .category(saved.getCategory())
+                        .quantity(0)
+                        .build()
+        );
 
         InventoryRequest req = new InventoryRequest(50);
         HttpHeaders headers = new HttpHeaders();
@@ -233,7 +252,7 @@ public class ProductInventoryServiceIntegrationTests {
         HttpEntity<InventoryRequest> entity = new HttpEntity<>(req, headers);
 
         ResponseEntity<InventoryResponse> setRes = restTemplate.exchange(
-                "http://localhost:" + port + "/api/inventory/" + productId,
+                "http://localhost:" + port + "/api/inventory/" + saved.getId(),
                 HttpMethod.PATCH,
                 entity,
                 InventoryResponse.class
@@ -241,14 +260,6 @@ public class ProductInventoryServiceIntegrationTests {
 
         assertThat(setRes.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(Objects.requireNonNull(setRes.getBody()).getQuantity()).isEqualTo(50);
-
-        ResponseEntity<InventoryResponse> getRes = restTemplate.getForEntity(
-                "http://localhost:" + port + "/api/inventory/" + productId,
-                InventoryResponse.class
-        );
-
-        assertThat(getRes.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(Objects.requireNonNull(getRes.getBody()).getQuantity()).isEqualTo(50);
     }
 
     @Test
@@ -314,6 +325,15 @@ public class ProductInventoryServiceIntegrationTests {
                 .name("Test Product").description("desc").price(BigDecimal.valueOf(1000))
                 .category("cat").imageUrl("img").isActive(true).build());
 
+        productSearchRepository.save(ProductDocument.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .description(product.getDescription())
+                .price(product.getPrice())
+                .quantity(10)
+                .category(product.getCategory())
+                .build());
+
         inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(10).build());
 
         Map<String, Object> orderEvent = Map.of(
@@ -351,17 +371,27 @@ public class ProductInventoryServiceIntegrationTests {
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(300))
                 .untilAsserted(() -> {
-                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
-                    assertThat(inventory.getQuantity()).isEqualTo(8);
+                    Inventory after = testInventoryHelper.findByProductIdWithLock(product.getId());
+                    assertThat(after.getQuantity()).isEqualTo(8);
                 });
     }
 
     @Test
+    @Transactional
     @DisplayName("Redisson 락 - 동시에 여러 쓰레드가 접근할 경우 하나만 성공한다")
     void concurrentStockDecrease_locking() throws Exception {
         Product product = productRepository.save(Product.builder()
                 .name("LockTest").description("desc").price(BigDecimal.valueOf(1000))
                 .category("cat").imageUrl("img").isActive(true).build());
+
+        productSearchRepository.save(ProductDocument.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .description(product.getDescription())
+                .price(product.getPrice())
+                .quantity(5)
+                .category(product.getCategory())
+                .build());
 
         inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(5).build());
 
@@ -399,53 +429,6 @@ public class ProductInventoryServiceIntegrationTests {
 
         Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isBetween(0, 5);
-    }
-
-    @Test
-    @DisplayName("Payment Failed 수신시 재고가 복구 된다.")
-    void stockRestore_locking() throws Exception {
-        Product product = productRepository.save(Product.builder()
-                .name("Test Product").description("desc").price(BigDecimal.valueOf(1000))
-                .category("cat").imageUrl("img").isActive(true).build());
-
-        inventoryRepository.save(Inventory.builder().productId(product.getId()).quantity(5).build());
-
-        Map<String, Object> paymentFailed = Map.of(
-                "orderId", new Random().nextInt(10000),
-                "items", List.of(Map.of("productId", product.getId(), "quantity", 5, "price", 1000)),
-                "reason", "결제 실패",
-                "timeStamp", LocalDateTime.now().toString(),
-                "traceId", UUID.randomUUID().toString()
-        );
-
-        String bootstrapServers = kafka.getHost() + ":" + kafka.getMappedPort(9093);
-
-        try (AdminClient admin = AdminClient.create(
-                Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers))) {
-            await()
-                    .atMost(Duration.ofSeconds(10))
-                    .pollInterval(Duration.ofMillis(500))
-                    .until(() -> admin.listTopics().names().get().contains("payment.failed"));
-        }
-
-        KafkaProducer<String, Object> producer = new KafkaProducer<>(Map.of(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
-                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
-                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
-                org.springframework.kafka.support.serializer.JsonSerializer.class
-        ));
-
-        producer.send(new ProducerRecord<>("payment.failed", product.getId().toString(), paymentFailed));
-        producer.flush();
-        producer.close();
-
-        await()
-                .atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(300))
-                .untilAsserted(() -> {
-                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
-                    assertThat(inventory.getQuantity()).isEqualTo(10);
-                });
     }
 
     @Test

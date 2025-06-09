@@ -13,7 +13,9 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.Repository.ProductRepository;
+import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.domain.Product;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
 import org.fortishop.productinventoryservice.dto.response.ProductResponse;
@@ -44,6 +46,9 @@ class ProductServiceImplTest {
     private ProductRepository productRepository;
 
     @Mock
+    private InventoryRepository inventoryRepository;
+
+    @Mock
     private RedisTemplate<String, String> redisTemplate;
 
     @Mock
@@ -65,7 +70,13 @@ class ProductServiceImplTest {
                 .isActive(true)
                 .build();
 
+        Inventory savedInv = Inventory.builder()
+                .productId(1L)
+                .quantity(10)
+                .build();
+
         given(productRepository.save(any())).willReturn(saved);
+        given(inventoryRepository.save(any())).willReturn(savedInv);
 
         ProductResponse response = productService.createProduct(request);
 

@@ -19,6 +19,7 @@ public class ProductSyncServiceImpl implements ProductSyncService {
                 .name(product.getName())
                 .description(product.getDescription())
                 .price(product.getPrice())
+                .quantity(0)
                 .category(product.getCategory())
                 .build();
         searchRepository.save(doc);
@@ -33,10 +34,19 @@ public class ProductSyncServiceImpl implements ProductSyncService {
                 .name(request.getName() != null ? request.getName() : existing.getName())
                 .description(request.getDescription() != null ? request.getDescription() : existing.getDescription())
                 .price(request.getPrice() != null ? request.getPrice() : existing.getPrice())
+                .quantity(existing.getQuantity())
                 .category(request.getCategory() != null ? request.getCategory() : existing.getCategory())
                 .build();
 
         searchRepository.save(updated);
+    }
+
+    @Override
+    public void updateQuantity(Long productId, Integer quantity) {
+        searchRepository.findById(productId).ifPresent(doc -> {
+            doc.setQuantity(quantity);
+            searchRepository.save(doc);
+        });
     }
 
     @Override

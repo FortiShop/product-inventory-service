@@ -2,7 +2,6 @@ package org.fortishop.productinventoryservice.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -11,11 +10,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.fortishop.productinventoryservice.Repository.InventoryRepository;
 import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.exception.Product.ProductException;
+import org.fortishop.productinventoryservice.kafka.InventoryEventProducer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,7 +25,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.kafka.core.KafkaTemplate;
 
 @ExtendWith(MockitoExtension.class)
 class InventoryServiceImplTest {
@@ -33,13 +33,16 @@ class InventoryServiceImplTest {
     private InventoryServiceImpl inventoryService;
 
     @Mock
+    private ProductSyncService productSyncService;
+
+    @Mock
     private InventoryRepository inventoryRepository;
 
     @Mock
     private RedissonClient redissonClient;
 
     @Mock
-    private KafkaTemplate<String, Object> kafkaTemplate;
+    private InventoryEventProducer inventoryEventProducer;
 
     @Mock
     private RLock lock;
@@ -57,6 +60,7 @@ class InventoryServiceImplTest {
 
         assertThat(response.getQuantity()).isEqualTo(100);
         verify(inventoryRepository).save(any());
+        verify(productSyncService).updateQuantity(productId, 100);
     }
 
     @Test
@@ -71,6 +75,7 @@ class InventoryServiceImplTest {
         InventoryResponse response = inventoryService.setInventory(productId, request);
 
         assertThat(response.getQuantity()).isEqualTo(30);
+        verify(productSyncService).updateQuantity(productId, 30);
     }
 
     @Test
@@ -105,7 +110,7 @@ class InventoryServiceImplTest {
         Inventory inventory = Inventory.builder().productId(productId).quantity(50).build();
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
-        given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
+        given(lock.tryLock(eq(5L), eq(TimeUnit.SECONDS))).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
         given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
@@ -113,7 +118,8 @@ class InventoryServiceImplTest {
 
         assertThat(result).isTrue();
         assertThat(inventory.getQuantity()).isEqualTo(30);
-        verify(kafkaTemplate).send(eq("inventory.reserved"), eq(orderId.toString()), any());
+
+        verify(inventoryEventProducer).sendInventoryReserved(eq(orderId), eq(productId), eq(traceId));
         verify(lock).unlock();
     }
 
@@ -126,14 +132,14 @@ class InventoryServiceImplTest {
         Inventory inventory = Inventory.builder().productId(productId).quantity(10).build();
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
-        given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(true);
+        given(lock.tryLock(eq(5L), eq(TimeUnit.SECONDS))).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
         given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
         assertThat(result).isFalse();
-        verify(kafkaTemplate).send(eq("inventory.failed"), eq(orderId.toString()), any());
+        verify(inventoryEventProducer).sendInventoryFailed(eq(orderId), eq(productId), eq("재고 부족"), eq(traceId));
         verify(lock).unlock();
     }
 
@@ -145,14 +151,12 @@ class InventoryServiceImplTest {
         String traceId = "trace789";
 
         given(redissonClient.getLock(anyString())).willReturn(lock);
-        given(lock.tryLock(anyLong(), anyLong(), any())).willReturn(false);
+        given(lock.tryLock(eq(5L), eq(TimeUnit.SECONDS))).willReturn(false);
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 10, traceId);
 
         assertThat(result).isFalse();
         verify(inventoryRepository, never()).findByProductIdForUpdate(any());
-        verify(kafkaTemplate).send(eq("inventory.failed"), eq(orderId.toString()), any());
+        verify(inventoryEventProducer).sendInventoryFailed(eq(orderId), eq(productId), eq("락 획득 실패"), eq(traceId));
     }
-
 }
-
