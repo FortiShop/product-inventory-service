@@ -29,11 +29,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional
     public InventoryResponse setInventory(Long productId, InventoryRequest request) {
         Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
-                .orElseGet(() -> inventoryRepository.save(
-                        Inventory.builder()
-                                .productId(productId)
-                                .quantity(0)
-                                .build()));
+                .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
 
         inventory.setQuantity(request.getQuantity());
         productSyncService.updateQuantity(productId, request.getQuantity());

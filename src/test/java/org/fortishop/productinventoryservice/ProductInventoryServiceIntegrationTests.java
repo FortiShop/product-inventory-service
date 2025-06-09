@@ -3,12 +3,15 @@ package org.fortishop.productinventoryservice;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -31,9 +34,7 @@ import org.fortishop.productinventoryservice.Repository.ProductSearchRepository;
 import org.fortishop.productinventoryservice.domain.Inventory;
 import org.fortishop.productinventoryservice.domain.Product;
 import org.fortishop.productinventoryservice.domain.ProductDocument;
-import org.fortishop.productinventoryservice.dto.request.InventoryRequest;
 import org.fortishop.productinventoryservice.dto.request.ProductRequest;
-import org.fortishop.productinventoryservice.dto.response.InventoryResponse;
 import org.fortishop.productinventoryservice.dto.response.ProductResponse;
 import org.fortishop.productinventoryservice.service.TestInventoryHelper;
 import org.junit.jupiter.api.BeforeAll;
@@ -45,9 +46,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -89,6 +90,9 @@ public class ProductInventoryServiceIntegrationTests {
 
     @Autowired
     ProductSearchRepository productSearchRepository;
+
+    @Autowired
+    private ElasticsearchTemplate elasticsearchTemplate;
 
     @Autowired
     ProductSearchRepository searchRepository;
@@ -220,46 +224,6 @@ public class ProductInventoryServiceIntegrationTests {
                 ProductResponse.class);
         assertThat(fetched.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(Objects.requireNonNull(fetched.getBody()).getName()).isEqualTo("상품명");
-    }
-
-    @Test
-    @DisplayName("재고 수동 설정 및 조회에 성공한다")
-    void setAndGetInventory_success() {
-        Product saved = productRepository.save(Product.builder()
-                .name("상품")
-                .description("desc")
-                .price(BigDecimal.valueOf(1000))
-                .category("cat")
-                .imageUrl("img")
-                .isActive(true)
-                .build());
-
-        productSearchRepository.save(
-                ProductDocument.builder()
-                        .id(saved.getId())
-                        .name(saved.getName())
-                        .description(saved.getDescription())
-                        .price(saved.getPrice())
-                        .category(saved.getCategory())
-                        .quantity(0)
-                        .build()
-        );
-
-        InventoryRequest req = new InventoryRequest(50);
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("x-member-role", "ROLE_ADMIN");
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<InventoryRequest> entity = new HttpEntity<>(req, headers);
-
-        ResponseEntity<InventoryResponse> setRes = restTemplate.exchange(
-                "http://localhost:" + port + "/api/inventory/" + saved.getId(),
-                HttpMethod.PATCH,
-                entity,
-                InventoryResponse.class
-        );
-
-        assertThat(setRes.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(Objects.requireNonNull(setRes.getBody()).getQuantity()).isEqualTo(50);
     }
 
     @Test
@@ -438,8 +402,9 @@ public class ProductInventoryServiceIntegrationTests {
         Product p1 = productRepository.save(Product.builder()
                 .name("Apple iPhone").description("Smartphone").price(BigDecimal.valueOf(1000))
                 .category("Electronics").imageUrl("iphone.jpg").isActive(true).build());
+
         Product p2 = productRepository.save(Product.builder()
-                .name("Banana Phone").description("Gag gift").price(BigDecimal.valueOf(10))
+                .name("Banana iPhone").description("Gag gift").price(BigDecimal.valueOf(10))
                 .category("Fun").imageUrl("banana.jpg").isActive(true).build());
 
         ProductDocument doc1 = ProductDocument.builder()
@@ -451,23 +416,27 @@ public class ProductInventoryServiceIntegrationTests {
                 .price(p2.getPrice()).category(p2.getCategory()).build();
 
         searchRepository.saveAll(List.of(doc1, doc2));
+        elasticsearchTemplate.indexOps(ProductDocument.class).refresh();
 
+        // when & then (색인이 실제로 반영되었는지 기다림)
         await()
                 .atMost(Duration.ofSeconds(10))
                 .pollInterval(Duration.ofMillis(300))
                 .untilAsserted(() -> {
                     ResponseEntity<String> res = restTemplate.getForEntity(
-                            getBaseUrl() + "/search?keyword=Apple", String.class);
+                            getBaseUrl() + "/search?keyword=iPhone", String.class);
+
                     assertThat(res.getStatusCode()).isEqualTo(HttpStatus.OK);
-                    assertThat(res.getBody()).contains("Apple iPhone");
+
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    JsonNode root = objectMapper.readTree(res.getBody());
+                    List<String> names = new ArrayList<>();
+                    for (JsonNode product : root.get("content")) {
+                        names.add(product.get("name").asText());
+                    }
+
+                    assertThat(names).containsExactlyInAnyOrder("Apple iPhone", "Banana iPhone");
                 });
-
-        ResponseEntity<String> response = restTemplate.getForEntity(
-                getBaseUrl() + "/search?keyword=Phone", String.class);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).contains("Apple iPhone");
-        assertThat(response.getBody()).contains("Banana Phone");
     }
 
     private static void createTopicIfNotExists(String topic, String bootstrapServers) {

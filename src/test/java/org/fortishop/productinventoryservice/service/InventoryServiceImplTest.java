@@ -48,22 +48,6 @@ class InventoryServiceImplTest {
     private RLock lock;
 
     @Test
-    @DisplayName("신규 재고 생성")
-    void setInventory_newInventory() {
-        Long productId = 1L;
-        InventoryRequest request = new InventoryRequest(100);
-
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.empty());
-        given(inventoryRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
-
-        InventoryResponse response = inventoryService.setInventory(productId, request);
-
-        assertThat(response.getQuantity()).isEqualTo(100);
-        verify(inventoryRepository).save(any());
-        verify(productSyncService).updateQuantity(productId, 100);
-    }
-
-    @Test
     @DisplayName("기존 재고 수정")
     void setInventory_updateExisting() {
         Long productId = 1L;
