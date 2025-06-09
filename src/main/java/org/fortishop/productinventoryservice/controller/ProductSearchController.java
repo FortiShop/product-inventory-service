@@ -20,6 +20,6 @@ public class ProductSearchController {
     @GetMapping("/search")
     public Page<ProductDocument> search(@RequestParam(name = "keyword") String keyword,
                                         @PageableDefault Pageable pageable) {
-        return searchRepository.findByNameContainingOrDescriptionContaining(keyword, keyword, pageable);
+        return searchRepository.search(keyword, pageable);
     }
 }
