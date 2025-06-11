@@ -391,7 +391,7 @@ public class ProductInventoryServiceIntegrationTests {
 
         Thread.sleep(3000);
 
-        Inventory inventory = inventoryRepository.findByProductIdForUpdate(product.getId()).orElseThrow();
+        Inventory inventory = inventoryRepository.findByProductId(product.getId()).orElseThrow();
         assertThat(inventory.getQuantity()).isBetween(0, 5);
     }
 

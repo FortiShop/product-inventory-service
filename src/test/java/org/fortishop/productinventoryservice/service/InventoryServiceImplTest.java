@@ -54,7 +54,7 @@ class InventoryServiceImplTest {
         InventoryRequest request = new InventoryRequest(30);
         Inventory inventory = Inventory.builder().productId(productId).quantity(10).build();
 
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
         InventoryResponse response = inventoryService.setInventory(productId, request);
 
@@ -68,7 +68,7 @@ class InventoryServiceImplTest {
         Long productId = 1L;
         Inventory inventory = Inventory.builder().productId(productId).quantity(20).build();
 
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
         InventoryResponse response = inventoryService.getInventory(productId);
 
@@ -79,7 +79,7 @@ class InventoryServiceImplTest {
     @DisplayName("재고 조회 실패 - 존재하지 않음")
     void getInventory_notFound() {
         Long productId = 1L;
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.empty());
+        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> inventoryService.getInventory(productId))
                 .isInstanceOf(ProductException.class);
@@ -96,7 +96,7 @@ class InventoryServiceImplTest {
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(eq(5L), eq(TimeUnit.SECONDS))).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
@@ -118,7 +118,7 @@ class InventoryServiceImplTest {
         given(redissonClient.getLock(anyString())).willReturn(lock);
         given(lock.tryLock(eq(5L), eq(TimeUnit.SECONDS))).willReturn(true);
         given(lock.isHeldByCurrentThread()).willReturn(true);
-        given(inventoryRepository.findByProductIdForUpdate(productId)).willReturn(Optional.of(inventory));
+        given(inventoryRepository.findByProductId(productId)).willReturn(Optional.of(inventory));
 
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 20, traceId);
 
@@ -140,7 +140,7 @@ class InventoryServiceImplTest {
         boolean result = inventoryService.decreaseStockWithLock(orderId, productId, 10, traceId);
 
         assertThat(result).isFalse();
-        verify(inventoryRepository, never()).findByProductIdForUpdate(any());
+        verify(inventoryRepository, never()).findByProductId(any());
         verify(inventoryEventProducer).sendInventoryFailed(eq(orderId), eq(productId), eq("락 획득 실패"), eq(traceId));
     }
 }

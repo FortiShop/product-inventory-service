@@ -14,7 +14,7 @@ public class TestInventoryHelper {
 
     @Transactional
     public Inventory findByProductIdWithLock(Long productId) {
-        return inventoryRepository.findByProductIdForUpdate(productId)
+        return inventoryRepository.findByProductId(productId)
                 .orElseThrow(() -> new IllegalArgumentException("not found"));
     }
 }

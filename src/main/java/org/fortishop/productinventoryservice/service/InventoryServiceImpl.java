@@ -14,6 +14,8 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Slf4j
 @Service
@@ -28,7 +30,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     @Transactional
     public InventoryResponse setInventory(Long productId, InventoryRequest request) {
-        Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
+        Inventory inventory = inventoryRepository.findByProductId(productId)
                 .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
 
         inventory.setQuantity(request.getQuantity());
@@ -39,12 +41,11 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     @Transactional
     public InventoryResponse getInventory(Long productId) {
-        Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
+        Inventory inventory = inventoryRepository.findByProductId(productId)
                 .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
         return InventoryResponse.of(inventory);
     }
 
-    @Override
     @Transactional
     public boolean decreaseStockWithLock(Long orderId, Long productId, int quantity, String traceId) {
         String lockKey = "lock:product:" + productId;
@@ -53,33 +54,33 @@ public class InventoryServiceImpl implements InventoryService {
 
         try {
             if (lock.tryLock(5, TimeUnit.SECONDS)) {
-                try {
-                    log.info("🔐 [Thread: {}] RedissonLock key={}, isLocked={}, heldByCurrentThread={}",
-                            Thread.currentThread().getName(),
-                            lockKey,
-                            lock.isLocked(),
-                            lock.isHeldByCurrentThread());
+                log.info("🔐 락 획득: {}", lockKey);
 
-                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
-                            .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+                Inventory inventory = inventoryRepository.findByProductId(productId)
+                        .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
 
-                    if (inventory.getQuantity() < quantity) {
-                        inventoryEventProducer.sendInventoryFailed(orderId, productId, "재고 부족", traceId);
-                        return false;
-                    }
-
-                    inventory.adjust(-quantity);
-                    inventoryRepository.save(inventory);
-                    log.info("✅ 재고 차감 성공 직후 수량: productId={}, 남은 수량={}", productId, inventory.getQuantity());
-
-                    inventoryEventProducer.sendInventoryReserved(orderId, productId, traceId);
-                    success = true;
-
-                } finally {
-                    if (lock.isHeldByCurrentThread()) {
-                        lock.unlock();
-                    }
+                if (inventory.getQuantity() < quantity) {
+                    inventoryEventProducer.sendInventoryFailed(orderId, productId, "재고 부족", traceId);
+                    return false;
                 }
+
+                inventory.adjust(-quantity);
+                inventoryRepository.save(inventory);
+
+                inventoryEventProducer.sendInventoryReserved(orderId, productId, traceId);
+                success = true;
+
+                // 트랜잭션 커밋 이후에 락 해제
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        if (lock.isHeldByCurrentThread()) {
+                            lock.unlock();
+                            log.info("🔓 트랜잭션 커밋 후 락 해제: {}", lockKey);
+                        }
+                    }
+                });
+
             } else {
                 log.warn("❌ 락 획득 실패: productId={}, orderId={}", productId, orderId);
                 inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 실패", traceId);
@@ -89,7 +90,7 @@ public class InventoryServiceImpl implements InventoryService {
             Thread.currentThread().interrupt();
             inventoryEventProducer.sendInventoryFailed(orderId, productId, "락 획득 중 인터럽트", traceId);
         } catch (Exception e) {
-            log.error("❌ 재고 차감 중 예외 발생: orderId={}, error={}", orderId, e.getMessage());
+            log.error("❌ 재고 차감 중 예외 발생: {}", e.getMessage());
             inventoryEventProducer.sendInventoryFailed(orderId, productId, "예외 발생: " + e.getMessage(), traceId);
         }
         return success;
@@ -102,21 +103,28 @@ public class InventoryServiceImpl implements InventoryService {
         RLock lock = redissonClient.getLock(lockKey);
 
         try {
-            if (lock.tryLock(5, TimeUnit.SECONDS)) {
-                try {
-                    Inventory inventory = inventoryRepository.findByProductIdForUpdate(productId)
-                            .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
+            if (lock.tryLock(5, 10, TimeUnit.SECONDS)) {
+                log.info("🔐 락 획득 성공: key={}, orderId={}", lockKey, orderId);
 
-                    inventory.adjust(quantity);
-                    inventoryRepository.save(inventory);
-                    log.info("✅ 재고 복원 성공: productId={}, 복원 수량={}, 현재 수량={}",
-                            productId, quantity, inventory.getQuantity());
+                Inventory inventory = inventoryRepository.findByProductId(productId)
+                        .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
 
-                } finally {
-                    if (lock.isHeldByCurrentThread()) {
-                        lock.unlock();
+                inventory.adjust(quantity);
+                inventoryRepository.save(inventory);
+
+                log.info("✅ 재고 복원 성공: productId={}, 복원 수량={}, 현재 수량={}",
+                        productId, quantity, inventory.getQuantity());
+
+                // 트랜잭션 커밋 이후에 락 해제
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        if (lock.isHeldByCurrentThread()) {
+                            lock.unlock();
+                            log.info("🔓 트랜잭션 커밋 후 락 해제: {}", lockKey);
+                        }
                     }
-                }
+                });
 
             } else {
                 log.warn("❌ 재고 복원 실패 (락 획득 실패): productId={}, orderId={}", productId, orderId);
