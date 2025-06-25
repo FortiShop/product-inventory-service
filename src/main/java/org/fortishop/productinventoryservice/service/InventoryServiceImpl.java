@@ -12,6 +12,7 @@ import org.fortishop.productinventoryservice.exception.Product.ProductExceptionT
 import org.fortishop.productinventoryservice.kafka.InventoryEventProducer;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -26,6 +27,9 @@ public class InventoryServiceImpl implements InventoryService {
     private final RedissonClient redissonClient;
     private final InventoryEventProducer inventoryEventProducer;
     private final ProductSyncService productSyncService;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    private static final String INVENTORY_KEY_PREFIX = "inventory::product::";
 
     @Override
     @Transactional
@@ -35,15 +39,37 @@ public class InventoryServiceImpl implements InventoryService {
 
         inventory.setQuantity(request.getQuantity());
         productSyncService.updateQuantity(productId, request.getQuantity());
+
+        String key = INVENTORY_KEY_PREFIX + productId;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                redisTemplate.delete(key);
+                log.debug("🗑️ 캐시 삭제 완료: {}", key);
+            }
+        });
+
         return InventoryResponse.of(inventory);
     }
 
     @Override
-    @Transactional
+    @Transactional(readOnly = true)
     public InventoryResponse getInventory(Long productId) {
+        String key = INVENTORY_KEY_PREFIX + productId;
+        InventoryResponse cached = (InventoryResponse) redisTemplate.opsForValue().get(key);
+        if (cached != null) {
+            log.debug("✅ Redis 캐시 조회 성공: {}", key);
+            return cached;
+        }
+
         Inventory inventory = inventoryRepository.findByProductId(productId)
                 .orElseThrow(() -> new ProductException(ProductExceptionType.PRODUCT_NOT_FOUND));
-        return InventoryResponse.of(inventory);
+
+        InventoryResponse response = InventoryResponse.of(inventory);
+        redisTemplate.opsForValue().set(key, response, 5, TimeUnit.MINUTES);
+        log.debug("📦 Redis 캐시 저장: {}", key);
+
+        return response;
     }
 
     @Transactional
@@ -78,6 +104,7 @@ public class InventoryServiceImpl implements InventoryService {
                             lock.unlock();
                             log.info("🔓 트랜잭션 커밋 후 락 해제: {}", lockKey);
                         }
+                        redisTemplate.delete(INVENTORY_KEY_PREFIX + productId);
                     }
                 });
 
@@ -123,6 +150,7 @@ public class InventoryServiceImpl implements InventoryService {
                             lock.unlock();
                             log.info("🔓 트랜잭션 커밋 후 락 해제: {}", lockKey);
                         }
+                        redisTemplate.delete(INVENTORY_KEY_PREFIX + productId);
                     }
                 });
 
